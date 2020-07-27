@@ -12,6 +12,8 @@ struct SocketCreationError{};
 struct SocketConnectError{};
 struct SocketCheckError{};
 
+#define MB 1024*1024
+
 class Client{
     public:
         Client(const char * ip, int port){
@@ -64,11 +66,16 @@ class Client{
         struct sockaddr_in _serv_addr;
 };
 
-int main(){
+int main(int argc, char ** argv){
+    if (argc != 2){
+        fprintf(stderr, "Usage: client `ipaddr`\n");
+        exit(-1);
+    }
     int ALL_COUNT = 11;
     int EVERY_TIME_COUNT = 10;
-    Client client("127.0.0.1", 6000);
-    client.init_bytes(10240);
+    printf("IP: %s\n", argv[1]);
+    Client client(argv[1], 10586);
+    client.init_bytes(MB);
     int * every_bytes = new int[ALL_COUNT];
     for (int i = 0; i < ALL_COUNT; ++i){
         every_bytes[i] = 1 << i;
