@@ -10,6 +10,8 @@ struct SocketCreationError{};
 struct SocketBindError{};
 struct SocketListenError{};
 
+#define MB 1024*1024
+
 class Server {
     public:
         Server(int port){
@@ -64,8 +66,8 @@ class Server {
 int main(){
     int ALL_COUNT = 11;
     int EVERY_TIMES_COUNT = 10;
-    Server server(6000);
-    server.init_bytes(10240);
+    Server server(10586);
+    server.init_bytes(MB);
     server.run(ALL_COUNT * EVERY_TIMES_COUNT);
     return 0;
 }
