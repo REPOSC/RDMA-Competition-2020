@@ -81,8 +81,9 @@ int main(int argc, char ** argv){
         every_bytes[i] = 1 << i;
         printf("%d: ", every_bytes[i]);
         for (int j = 0; j < EVERY_TIME_COUNT; ++j){
-            int time_cost = client.run_and_gettime(every_bytes[i]);
-            printf("%d ", time_cost);
+            double time_cost = client.run_and_gettime(every_bytes[i]) / 1000. / 1000.;
+            double bw = 1. / 1000 / time_cost;
+            printf("%lfGBPS ", bw);
         }
         usleep(100000);
         printf("\n");   

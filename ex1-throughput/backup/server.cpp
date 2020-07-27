@@ -22,7 +22,7 @@ class Server {
             }
             memset(&_serv_addr, 0, sizeof(_serv_addr));
             _serv_addr.sin_family = AF_INET;
-            _serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+            _serv_addr.sin_addr.s_addr = inet_addr("0.0.0.0");
             _serv_addr.sin_port = htons(port);
             if (bind(_sock, (struct sockaddr *)(&_serv_addr), sizeof(_serv_addr)) == -1){
                 perror("bind");
