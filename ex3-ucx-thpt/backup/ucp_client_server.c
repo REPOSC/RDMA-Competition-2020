@@ -58,7 +58,7 @@ int EVERY_SEND_LEN_BEGIN = 4, EVERY_SEND_LEN_END = 24;
 typedef enum {
     CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
     CLIENT_SERVER_SEND_RECV_TAG     = UCS_BIT(1),
-    CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_STREAM
+    CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_TAG
 } send_recv_type_t;
 
 
@@ -102,7 +102,7 @@ static void tag_recv_cb(void *request, ucs_status_t status,
                         ucp_tag_recv_info_t *info)
 {
     test_req_t *req = request;
-
+    RECEIVED_THIS = info->length;
     req->complete = 1;
 }
 
@@ -395,22 +395,126 @@ static int send_recv_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
 static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
                          int iterations)
 {
+    //printf("in tag\n");
     test_req_t *request;
+    size_t length;
+
+    int need_length = 0;
+    int err = 0;
+    int iter = 0;
 
     if (!is_server) {
-        /* Client sends a message to the server using the Tag-Matching API */
-        request = ucp_tag_send_nb(ep, test_message, 1,
-                                  ucp_dt_make_contig(TEST_BUFFER_LEN), TAG,
-                                  send_cb);
-    } else {
-        /* Server receives a message from the client using the Tag-Matching API */
-        request = ucp_tag_recv_nb(ucp_worker, &recv_message, 1,
-                                  ucp_dt_make_contig(TEST_BUFFER_LEN),
-                                  TAG, 0, tag_recv_cb);
-    }
+        double Gbps = 0;
+        for (iter = 0; iter < iterations; ++iter){
+            int i;
+            struct timeval tv_begin, tv_end;
+            need_length = EVERY_SEND_LEN;
+            /* Warm Up */
+            for (i = 0; i < TEST_BUFFER_LEN / EVERY_SEND_LEN; ++i){
+                /* Client sends a message to the server using the stream API */
+                request = ucp_tag_send_nb(ep, test_message + i * EVERY_SEND_LEN, 1,
+                                            ucp_dt_make_contig(need_length), TAG,
+                                            send_cb);
+                err = request_finalize(ucp_worker, request, is_server, 
+                                iterations);
+                if (err) return err;
+            }
+            /* Get RTT */
+            gettimeofday(&tv_begin, NULL);
+            request = ucp_tag_send_nb(ep, test_message, 1,
+                    ucp_dt_make_contig(1), TAG, 
+                    send_cb);
+            err = request_finalize(ucp_worker, request, is_server, 
+                    iterations);
+    
+            request = ucp_tag_recv_nb(ucp_worker, recv_message, 1,
+                                            ucp_dt_make_contig(1), TAG, 0,
+                                            tag_recv_cb);
+            err = request_finalize(ucp_worker, request, !is_server, 
+                                iterations);
 
-    return request_finalize(ucp_worker, request, is_server, 
+            gettimeofday(&tv_end, NULL);
+            long RTT = (tv_end.tv_sec - tv_begin.tv_sec) * 1000000 + (tv_end.tv_usec - tv_begin.tv_usec);
+
+            /* Begin */
+            gettimeofday(&tv_begin, NULL);
+            for (i = 0; i < TEST_BUFFER_LEN / EVERY_SEND_LEN; ++i){
+                /* Client sends a message to the server using the stream API */
+                request = ucp_tag_send_nb(ep, test_message + i * EVERY_SEND_LEN, 1,
+                                            ucp_dt_make_contig(need_length), TAG,
+                                            send_cb);
+                err = request_finalize(ucp_worker, request, is_server, 
+                                iterations);
+                if (err) return err;
+            }
+            request = ucp_tag_recv_nb(ucp_worker, recv_message, 1,
+                                            ucp_dt_make_contig(1), TAG, 0, tag_recv_cb);
+            err = request_finalize(ucp_worker, request, !is_server, 
+                                iterations);
+            gettimeofday(&tv_end, NULL);
+            if (err) return err;
+            if (recv_message[0] != CHECKER) return -1;
+            long usec = (tv_end.tv_sec - tv_begin.tv_sec) * 1000000 + (tv_end.tv_usec - tv_begin.tv_usec) - RTT / 2;
+            Gbps += (TEST_BUFFER_LEN / 1000. / 1000. / 1000. * 8) / (usec / 1000. / 1000.);
+        }
+        printf("%lf Gbps", Gbps / iterations);
+        return 0;
+    } else {
+        for (iter = 0; iter < iterations; ++iter){
+            /* Warm Up */
+            RECEIVED_BUFFER_SIZE = 0;
+            while (RECEIVED_BUFFER_SIZE < TEST_BUFFER_LEN){
+                need_length = TEST_BUFFER_LEN - RECEIVED_BUFFER_SIZE;
+                /* Server receives a message from the client using the stream API */
+                request = ucp_tag_recv_nb(ucp_worker, recv_message + RECEIVED_BUFFER_SIZE, 1,
+                                            ucp_dt_make_contig(need_length), TAG, 0,
+                                            tag_recv_cb);
+                err = request_finalize(ucp_worker, request, is_server, 
+                                iterations);
+                if (err) return err;
+                RECEIVED_BUFFER_SIZE += RECEIVED_THIS;
+                RECEIVED_THIS = 0;
+            }
+            if (recv_message[0] != CHECKER) return -1;
+            /* Get RTT */
+            request = ucp_tag_recv_nb(ucp_worker, recv_message + RECEIVED_BUFFER_SIZE, 1,
+                    ucp_dt_make_contig(1), TAG, 0, tag_recv_cb);
+            err = request_finalize(ucp_worker, request, is_server, 
+                    iterations);
+
+            request = ucp_tag_send_nb(ep, test_message, 1,
+                                            ucp_dt_make_contig(1), TAG,
+                                            send_cb);
+            err = request_finalize(ucp_worker, request, !is_server, 
+                                iterations);
+
+    
+            if (err) return err;
+
+            /* Begin */
+            RECEIVED_BUFFER_SIZE = 0;
+            while (RECEIVED_BUFFER_SIZE < TEST_BUFFER_LEN){
+                need_length = TEST_BUFFER_LEN - RECEIVED_BUFFER_SIZE;
+                /* Server receives a message from the client using the stream API */
+                request = ucp_tag_recv_nb(ucp_worker, recv_message + RECEIVED_BUFFER_SIZE, 1,
+                                            ucp_dt_make_contig(need_length), TAG, 0,
+                                            tag_recv_cb);
+                err = request_finalize(ucp_worker, request, is_server, 
+                                iterations);
+                if (err) return err;
+                RECEIVED_BUFFER_SIZE += RECEIVED_THIS;
+                RECEIVED_THIS = 0;
+            }
+            if (recv_message[0] != CHECKER) return -1;
+            request = ucp_tag_send_nb(ep, test_message, 1,
+                                            ucp_dt_make_contig(1), TAG,
+                                            send_cb);
+            err = request_finalize(ucp_worker, request, !is_server, 
                             iterations);
+            if (err) return err;
+        }
+        return 0;
+    }
 }
 
 /**
